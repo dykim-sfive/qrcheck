@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<title>QR 수신기</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-corner="top">
+<main class="app">
+  <nav class="nav"><a href="index.html" aria-current="page">실시간 해독</a><a href="record.html">녹화 → 해독</a></nav>
+
+  <section class="stage" id="stage">
+    <button class="preview" id="preview" type="button" aria-label="카메라 미리보기 (탭하면 크게/작게)">
+      <video id="video" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </button>
+    <div class="now">
+      <div class="phase" id="phase" data-phase="starting">시작 전</div>
+      <p class="message" id="message">시작 버튼을 눌러 카메라를 켜세요.</p>
+    </div>
+  </section>
+
+  <section class="card" id="progressCard">
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="bar"><div class="fill" id="fill"></div></div>
+    <div class="pct"><strong id="pct">0%</strong><span id="blocks">—</span></div>
+    <dl class="stats">
+      <div><dt>새 프레임</dt><dd id="sNew">0</dd></div>
+      <div><dt>중복</dt><dd id="sDup">0</dd></div>
+      <div><dt>오류</dt><dd id="sBad">0</dd></div>
+      <div><dt>다른 전송</dt><dd id="sOther">0</dd></div>
+    </dl>
+  </section>
+
+  <section class="card result" id="result" hidden>
+    <div><strong id="fileName">qr-transfer.zip</strong> <span id="fileSize"></span></div>
+    <button class="primary" id="download" type="button">내려받기</button>
+  </section>
+
+  <div class="zoombar" id="zoombar" role="group" aria-label="카메라 배율">
+    <span>배율</span>
+    <button type="button" data-zoom="1" aria-pressed="true">1×</button>
+    <button type="button" data-zoom="1.5" aria-pressed="false">1.5×</button>
+    <button type="button" data-zoom="2" aria-pressed="false">2×</button>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="startStop" type="button">시작</button>
+    <button id="reset" type="button">초기화</button>
+  </div>
+
+  <details class="card settings" id="settings">
+    <summary>설정</summary>
+    <label>카메라
+      <select id="facing"><option value="environment">후면</option><option value="user">전면</option></select>
+    </label>
+    <label>카메라 해상도
+      <select id="width"><option value="640">낮음 (640)</option><option value="1280" selected>보통 (1280)</option><option value="1920">높음 (1920)</option></select>
+    </label>
+    <label>인식 주기
+      <select id="fps"><option value="2">초당 2회</option><option value="5">초당 5회</option><option value="10" selected>초당 10회</option><option value="15">초당 15회</option><option value="0">최대 속도</option></select>
+    </label>
+    <label>인식 확대 (작은 QR 용)
+      <select id="upscale"><option value="1" selected>1배</option><option value="1.5">1.5배</option><option value="2">2배</option></select>
+    </label>
+    <label>미리보기 위치
+      <select id="corner"><option value="top">왼쪽 위</option><option value="bottom">왼쪽 아래</option></select>
+    </label>
+    <label id="zoomRow" hidden>줌 <input type="range" id="zoom"></label>
+    <label id="torchRow" hidden class="inline"><input type="checkbox" id="torch"> 플래시</label>
+  </details>
+  <p class="hint">PC 화면의 QR 재생을 2바퀴 이상 촬영하세요. 모든 처리는 이 폰 안에서만 이루어집니다.</p>
+</main>
+<script type="module" src="src/app.js"></script>
+</body>
+</html>

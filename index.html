@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR 동영상 전송</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1b1f27; --muted:#667085; --line:#dfe3ea;
+          --accent:#2457d6; --ok:#11823b; --warn:#b54708; --bad:#c0261c; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.5 -apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif; }
+  main { max-width:980px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 16px; font-size:13px; }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; }
+  .tabs button { flex:1; padding:10px; border:1px solid var(--line); background:var(--card); border-radius:8px;
+                 font:inherit; font-weight:600; cursor:pointer; color:var(--muted); }
+  .tabs button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  section { display:none; } section.on { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:12px; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
+  label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  select, textarea, input { font:inherit; color:var(--ink); }
+  select { padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  .btn { padding:8px 14px; border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:6px;
+         cursor:pointer; font:inherit; font-weight:600; text-decoration:none; display:inline-block; }
+  .btn.ghost { background:#fff; color:var(--accent); }
+  .btn:disabled { opacity:.45; cursor:default; }
+  .info { font-size:13px; color:var(--muted); margin-top:10px; }
+  .hint { font-size:12px; color:var(--muted); margin-top:6px; }
+  .msg { padding:10px 12px; border-radius:8px; font-size:14px; margin-top:8px; }
+  .msg.ok { background:#e7f6ec; color:var(--ok); } .msg.warn { background:#fdf0e1; color:var(--warn); }
+  .msg.bad { background:#fde8e6; color:var(--bad); }
+  #qrCanvas { display:block; margin:12px 0; image-rendering:pixelated; border:1px solid var(--line); background:#fff; max-width:100%; }
+  .qrbar { display:flex; gap:8px; align-items:center; justify-content:flex-start; flex-wrap:wrap; }
+  .qrcenter #qrCanvas { margin-left:auto; margin-right:auto; }
+  .qrcenter .qrbar { justify-content:center; }
+  .bar { height:10px; background:#e8ebf0; border-radius:99px; overflow:hidden; margin:8px 0; }
+  .bar > i { display:block; height:100%; width:0; background:var(--accent); transition:width .2s; }
+  code { background:#eef0f4; padding:1px 5px; border-radius:4px; }
+  .paste { border:2px dashed var(--line); border-radius:10px; padding:26px 14px; text-align:center; color:var(--muted);
+           background:#fafbfc; outline:none; }
+  .paste:focus, .paste.hot { border-color:var(--accent); background:#f0f5ff; color:var(--accent); }
+  .item { border:1px solid var(--line); border-radius:10px; background:#fff; margin-bottom:10px; overflow:hidden; }
+  .ihead { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:8px 12px; background:#fafbfc; border-bottom:1px solid var(--line); }
+  .badge { background:var(--accent); color:#fff; font-size:12px; font-weight:700; padding:2px 8px; border-radius:99px; }
+  .imeta { font-size:12px; color:var(--muted); }
+  .item pre { margin:0; padding:10px 12px; max-height:220px; overflow:auto; font-size:12px; white-space:pre-wrap; word-break:break-all;
+              font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .item img { display:block; max-width:100%; max-height:260px; margin:10px auto; }
+  .item iframe { width:100%; height:200px; border:0; border-top:1px solid var(--line); background:#fff; }
+  .item details { border-top:1px solid var(--line); } .item summary { cursor:pointer; padding:6px 12px; font-size:12px; color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>클립보드 · 파일 ⇄ QR 동영상</h1>
+  <p class="sub">파일이나 클립보드를 압축해 애니메이션 QR로 보여주고, 카메라로 찍은 영상/사진에서 다시 복원합니다. (Python 서버에서 처리)</p>
+  <div class="tabs">
+    <button id="tabClip" class="on">① 클립보드 검증</button>
+    <button id="tabQr">② QR 동영상 (송신 · 수신)</button>
+  </div>
+
+  <section id="secClip" class="on">
+    <div class="card">
+      <div class="paste" id="pasteZone" tabindex="0">여기를 클릭한 뒤 <b>Ctrl/⌘ + V</b> 로 붙여넣으세요 (HTML · 텍스트 · 이미지 · 파일 · RTF 등)</div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost" id="readClip">클립보드 직접 읽기</button>
+        <button class="btn ghost" id="clipClear">지우기</button>
+      </div>
+      <div class="hint">붙여넣은 클립보드에 들어 있는 모든 포맷을 종류·크기·내용과 함께 보여줍니다. 필요 없는 항목은 체크를 해제하세요.</div>
+    </div>
+    <div id="clipList"></div>
+    <div class="card" id="clipNext" hidden>
+      <div class="info" id="clipSum" style="margin:0 0 10px"></div>
+      <div class="row">
+        <button class="btn" id="clipGoQr">다음 → 압축하고 QR 동영상으로</button>
+        <span class="hint" style="margin:0">QR 크기·오류 정정 등은 ② 탭에서 바꿀 수 있습니다. 압축 파일은 ② 탭에서 내려받을 수 있습니다.</span>
+      </div>
+      <div id="clipMsg"></div>
+    </div>
+  </section>
+
+  <section id="secQr">
+    <div class="card" id="qrSend">
+      <b>송신 · 파일 → 애니메이션 QR</b>
+      <div class="row" style="margin-top:8px">
+        <label>파일 <input type="file" id="qrFile"></label>
+        <label>QR 크기
+          <select id="qrVer"><option value="10">작게 (57×57)</option><option value="15" selected>보통 (77×77)</option><option value="20">크게 (97×97)</option><option value="25">매우 크게 (117×117)</option></select>
+        </label>
+        <label>오류 정정
+          <select id="qrEcc"><option value="L">L (7%, 용량↑)</option><option value="M" selected>M (15%)</option><option value="Q">Q (25%, 용량↓)</option></select>
+        </label>
+        <label>여분 프레임
+          <select id="qrRepair"><option value="0.3">+30%</option><option value="0.5" selected>+50%</option><option value="1">+100%</option></select>
+        </label>
+        <label>표시 크기
+          <select id="qrSize"><option value="300" selected>작게 (≈300px)</option><option value="450">중간 (≈450px)</option><option value="650">크게 (≈650px)</option><option value="fit">화면 맞춤</option></select>
+        </label>
+        <label>표시 위치
+          <select id="qrAlign"><option value="left" selected>왼쪽</option><option value="center">가운데</option></select>
+        </label>
+        <label>초당 프레임
+          <select id="qrFps"><option>4</option><option>6</option><option selected>8</option><option>10</option><option>12</option></select>
+        </label>
+      </div>
+      <div class="qrbar" style="margin-top:8px"><button class="btn" id="qrGo" disabled>▶ 시작</button><span class="hint">파일을 고르고 설정을 마친 뒤 시작을 누르면 QR 이 재생됩니다.</span></div>
+      <div class="info" id="qrInfo">파일을 선택하세요. 프레임 일부를 놓쳐도 서로 다른 프레임이 (블록 수 + 2~3)개 모이면 복원됩니다.</div>
+      <div id="qrDl" style="margin-top:8px"></div>
+      <canvas id="qrCanvas" hidden></canvas>
+      <div class="qrbar" id="qrCtl" hidden>
+        <button class="btn ghost" id="qrPrev">◀</button><button class="btn" id="qrPlay">⏸ 정지</button><button class="btn ghost" id="qrNext">▶</button>
+        <span id="qrPos" class="info" style="margin:0"></span>
+      </div>
+      <div class="hint">카메라로 영상을 찍을 때는 화면 밝기를 높이고 QR이 화면의 절반 이상 차지하게 하세요. 한 바퀴 이상 재생되도록 5~10초 더 촬영하세요.</div>
+    </div>
+    <div class="card">
+      <b>수신 · 영상/사진 → 파일</b>
+      <div class="row" style="margin-top:8px">
+        <label>영상 또는 사진 (여러 개 가능) <input type="file" id="qrIn" accept="video/*,image/*" multiple></label>
+        <label>프레임 건너뛰기
+          <select id="qrStep"><option value="1" selected>모든 프레임 (권장)</option><option value="2">2프레임마다 (빠름, 1~2바퀴만 찍었다면 비권장)</option><option value="4">4프레임마다 (매우 빠름)</option></select>
+        </label>
+        <button class="btn ghost" id="qrReset">처음부터</button>
+      </div>
+      <div class="bar"><i id="qrBar"></i></div>
+      <div class="info" id="qrStatus">영상을 올리면 프레임을 읽어 QR을 해독합니다. 여러 영상/사진의 결과는 자동으로 합쳐집니다.</div>
+      <div id="qrResult"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmtKB = n => (n / 1024).toFixed(1) + ' KB';
+async function api(path, opts) {
+  const r = await fetch(path, opts), text = await r.text();
+  let j;
+  try { j = JSON.parse(text); }
+  catch {
+    throw new Error('서버가 JSON 대신 다른 응답(HTTP ' + r.status + ')을 보냈습니다. 이 페이지가 `python3 server.py` 로 띄운 주소(예: http://127.0.0.1:8765)가 맞는지 확인하세요. 정적 호스트(GitHub Pages 등)나 IDE 미리보기에서는 동작하지 않습니다.');
+  }
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function showTab(w) {
+  for (const [t, s, k] of [['tabClip', 'secClip', 'clip'], ['tabQr', 'secQr', 'qr']]) {
+    $(t).classList.toggle('on', w === k); $(s).classList.toggle('on', w === k);
+  }
+}
+$('tabClip').onclick = () => showTab('clip'); $('tabQr').onclick = () => showTab('qr');
+
+api('/api/status').then(st => {
+  if (!st.qr) $('qrInfo').innerHTML = '<span style="color:var(--bad)">QR 기능에는 <code>pip install -r requirements.txt</code> 후 서버 재시작이 필요합니다.</span>';
+});
+
+// ---------- 클립보드 검증 ----------
+let clipItems = [];                       // {type, name, bytes, text|null, kind, include}
+const EXT = { 'text/html': 'html', 'text/plain': 'txt', 'text/rtf': 'rtf', 'text/uri-list': 'uri.txt', 'text/csv': 'csv',
+              'application/json': 'json', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg' };
+const isTextType = t => t.startsWith('text/') || /json|xml|javascript|svg/.test(t);
+
+function sniff(type, text) {              // 내용을 보고 실제 포맷을 추정
+  if (type === 'text/html') return /<!--StartFragment-->/.test(text) ? 'HTML (브라우저 복사 조각)' : 'HTML';
+  if (type === 'text/rtf') return 'RTF (서식 있는 텍스트)';
+  if (type === 'text/uri-list') return 'URI 목록';
+  if (type.startsWith('image/')) return '이미지';
+  if (text === null) return '바이너리';
+  const t = text.trim();
+  if (/^[\[{]/.test(t)) { try { JSON.parse(t); return 'JSON'; } catch {} }
+  if (/^<\?xml/i.test(t)) return 'XML';
+  if (/^<!doctype html|^<html[\s>]/i.test(t)) return 'HTML 문서';
+  if (/^<([a-z][\w-]*)[\s>][\s\S]*<\/\1>$/i.test(t)) return 'HTML/XML 조각';
+  if (/^https?:\/\/\S+$/.test(t)) return 'URL';
+  const rows = t.split(/\r?\n/);
+  if (rows.length > 1 && rows.every(r => r.includes('\t'))) return '표 데이터 (TSV – 스프레드시트 복사)';
+  const c = rows[0].split(',').length;
+  if (rows.length > 1 && c > 1 && rows.every(r => r.split(',').length === c)) return 'CSV';
+  if (/^#{1,6}\s|^```|^\s*[-*]\s.+\n\s*[-*]\s/m.test(t)) return '마크다운 추정 텍스트';
+  return '일반 텍스트';
+}
+// 타입 이름이 아니라 내용으로 텍스트 여부와 인코딩을 판단 (OS/앱마다 타입 이름이 제각각이라서)
+function decodeBytes(b) {
+  const td = (label, bytes, fatal = true) => new TextDecoder(label, { fatal }).decode(bytes);
+  const clean = t => !/[\x00-\x08\x0b\x0c\x0e-\x1f�]/.test(t);
+  if (b.length >= 3 && b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) return { text: td('utf-8', b.subarray(3), false), enc: 'UTF-8 (BOM)' };
+  if (b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE) return { text: td('utf-16le', b.subarray(2), false), enc: 'UTF-16LE (BOM)' };
+  if (b.length >= 2 && b[0] === 0xFE && b[1] === 0xFF) return { text: td('utf-16be', b.subarray(2), false), enc: 'UTF-16BE (BOM)' };
+  try { const t = td('utf-8', b); if (clean(t)) return { text: t, enc: 'UTF-8' }; } catch {}
+  let zeroOdd = 0; for (let i = 1; i < b.length; i += 2) if (b[i] === 0) zeroOdd++;
+  if (b.length >= 4 && zeroOdd > b.length / 2 * 0.3) { try { const t = td('utf-16le', b); if (clean(t)) return { text: t, enc: 'UTF-16LE' }; } catch {} }
+  try { const t = td('euc-kr', b); if (clean(t)) return { text: t, enc: 'CP949/EUC-KR' }; } catch {}
+  return null;
+}
+let clipDiag = '';
+function addClipItem(rawType, bytes, name) {
+  const type = (rawType || 'application/octet-stream').split(';')[0].trim().toLowerCase();
+  const dec = type.startsWith('image/') ? null : decodeBytes(bytes);
+  const text = dec ? dec.text : null;
+  const kind = sniff(type, text), byKind = [['HTML', 'html'], ['JSON', 'json'], ['XML', 'xml'], ['CSV', 'csv'], ['표 데이터', 'tsv'], ['마크다운', 'md'], ['RTF', 'rtf']];
+  // 타입 이름(application/octet-stream 등)이 모호해도 텍스트로 해독됐다면 내용 종류로 확장자를 정한다
+  const ext = EXT[type] || (text !== null ? (byKind.find(([k]) => kind.startsWith(k)) || [0, 'txt'])[1] : (type.split('/')[1] || 'bin').replace(/[^\w.-]/g, ''));
+  clipItems.push({ type, rawType, bytes, text, textEnc: dec?.enc, name: name || `clipboard.${ext}`, kind, include: true });
+}
+const platformName = () => (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '?';
+async function collectFromPasteEvent(e) {
+  const dt = e.clipboardData, jobs = [];
+  clipDiag = `${platformName()} · paste 이벤트 types=${JSON.stringify([...dt.types])} · items=${JSON.stringify([...dt.items].map(i => i.kind + ':' + i.type))} · files=${dt.files.length}`;
+  for (const it of dt.items) {
+    if (it.kind === 'string') jobs.push(new Promise(res => it.getAsString(s => { addClipItem(it.type, new TextEncoder().encode(s)); res(); })));
+    else if (it.kind === 'file') {
+      const f = it.getAsFile();
+      if (f) jobs.push(f.arrayBuffer().then(b => addClipItem(f.type || 'application/octet-stream', new Uint8Array(b), f.name && f.name !== 'image.png' ? f.name : undefined)));
+    }
+  }
+  await Promise.all(jobs);
+}
+addEventListener('paste', async e => {
+  if (!$('secClip').classList.contains('on') || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  e.preventDefault(); clipItems = []; $('clipMsg').innerHTML = '';
+  await collectFromPasteEvent(e); renderClip();
+});
+$('readClip').onclick = async () => {
+  clipItems = []; $('clipMsg').innerHTML = '';
+  try {
+    const cis = await navigator.clipboard.read();
+    clipDiag = `${platformName()} · clipboard.read() types=${JSON.stringify(cis.map(c => c.types))}`;
+    for (const ci of cis)
+      for (const t of ci.types) addClipItem(t, new Uint8Array(await (await ci.getType(t)).arrayBuffer()));
+    renderClip();
+  } catch (e) { $('clipList').innerHTML = `<div class="msg warn">클립보드를 읽지 못했습니다 (${e.message}). 위 영역을 클릭하고 Ctrl/⌘+V 로 붙여넣어 보세요.</div>`; }
+};
+$('clipClear').onclick = () => { clipItems = []; clipDiag = ''; $('clipMsg').innerHTML = ''; renderClip(); };
+$('pasteZone').onfocus = () => $('pasteZone').classList.add('hot'); $('pasteZone').onblur = () => $('pasteZone').classList.remove('hot');
+
+function mk(tag, props = {}, ...kids) {
+  const el = Object.assign(document.createElement(tag), props);
+  for (const k of kids) el.append(k);
+  return el;
+}
+function renderClip() {
+  const list = $('clipList'); list.replaceChildren();
+  if (clipDiag) list.append(mk('div', { className: 'hint', style: 'margin:0 0 10px;word-break:break-all', textContent: '진단: ' + clipDiag }));
+  if (!clipItems.length) {
+    if (clipDiag) list.append(mk('div', { className: 'msg warn', textContent: '붙여넣은 데이터가 비어 있습니다.' }));
+    $('clipNext').hidden = true;
+    return;
+  }
+  clipItems.forEach((it, i) => {
+    const cb = mk('input', { type: 'checkbox', checked: it.include, onchange: () => { it.include = cb.checked; updateClipSum(); } });
+    const head = mk('div', { className: 'ihead' }, cb, mk('span', { className: 'badge', textContent: it.kind }),
+      mk('code', { textContent: it.rawType || it.type }),
+      mk('span', { className: 'imeta', textContent: `${it.bytes.length.toLocaleString()} bytes${it.textEnc ? ' · ' + it.textEnc : ''} → ${it.name}` }));
+    const box = mk('div', { className: 'item' }, head);
+    if (it.type.startsWith('image/')) {
+      const url = URL.createObjectURL(new Blob([it.bytes], { type: it.type }));
+      const img = mk('img', { src: url, alt: it.name });
+      img.onload = () => { head.querySelector('.imeta').textContent += ` · ${img.naturalWidth}×${img.naturalHeight}px`; };
+      box.append(img);
+    } else if (it.text !== null) {
+      const shown = it.text.length > 3000 ? it.text.slice(0, 3000) + `\n… (총 ${it.text.length.toLocaleString()}자 중 3000자만 표시)` : it.text;
+      box.append(mk('pre', { textContent: shown || '(빈 내용)' }));
+      if (it.type === 'text/html' || it.kind.startsWith('HTML')) {      // 스크립트 실행이 막힌 샌드박스에서 렌더링
+        const d = mk('details', {}, mk('summary', { textContent: '렌더링 미리보기' }));
+        d.addEventListener('toggle', () => { if (d.open && !d.querySelector('iframe')) d.append(mk('iframe', { sandbox: '', srcdoc: it.text })); });
+        box.append(d);
+      }
+    } else {
+      const hex = [...it.bytes.slice(0, 64)].map(b => b.toString(16).padStart(2, '0')).join(' ');
+      box.append(mk('pre', { textContent: `(바이너리) 앞 64바이트:\n${hex}` }));
+    }
+    list.append(box);
+  });
+  $('clipNext').hidden = false; updateClipSum();
+}
+function updateClipSum() {
+  const sel = clipItems.filter(i => i.include), n = sel.reduce((a, i) => a + i.bytes.length, 0);
+  $('clipSum').innerHTML = `${clipItems.length}개 포맷 중 <b>${sel.length}개</b> 선택 · 원본 합계 <b>${n.toLocaleString()} bytes</b>`;
+  $('clipGoQr').disabled = !sel.length;
+}
+const toB64 = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+async function clipPack() {            // 선택 항목을 서버에서 ZIP 으로 압축해 File 로 돌려준다
+  const sel = clipItems.filter(i => i.include);
+  $('clipGoQr').disabled = true; $('clipMsg').innerHTML = '<div class="info">압축 중…</div>';
+  try {
+    const r = await api('/api/pack', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: sel.map(i => ({ name: i.name, b64: toB64(i.bytes) })) }) });
+    const zip = Uint8Array.from(atob(r.zip_b64), c => c.charCodeAt(0));
+    $('clipMsg').innerHTML = `<div class="msg ok">✔ ${r.files.join(', ')} → clipboard.zip · ${r.original.toLocaleString()} → ${r.packed.toLocaleString()} bytes (${Math.round(r.packed / Math.max(1, r.original) * 100)}%)</div>`;
+    return new File([zip], 'clipboard.zip', { type: 'application/zip' });
+  } catch (e) { $('clipMsg').innerHTML = `<div class="msg bad">오류: ${e.message}</div>`; return null; }
+  finally { updateClipSum(); }
+}
+$('clipGoQr').onclick = async () => {      // → QR 동영상
+  const f = await clipPack(); if (!f) return;
+  qrSource = f; showTab('qr'); qrPrepare(f);
+};
+
+// ---------- QR 동영상 ----------
+let qrStream = null, qrIdx = 0, qrTimer = null, qrPlaying = true, qrSource = null, qrDlUrl = null;   // qrSource: 파일 선택 또는 클립보드에서 넘어온 File
+const qrCv = $('qrCanvas'), qrCx = qrCv.getContext('2d');
+function qrDraw(i) {
+  const st = qrStream, m = st.modules, quiet = 4, tot = m + quiet * 2;
+  const fit = $('qrSize').value === 'fit', maxW = innerWidth - 60;
+  // 화면 맞춤: 화면에 꽉 채움 / 그 외: 기준 QR(보통, 85칸)로 모듈당 px를 정해 QR 크기에 비례해 커지고 작아짐
+  const base = fit ? Math.min(maxW, innerHeight * 0.72) / tot : +$('qrSize').value / 85;
+  const px = Math.max(2, Math.min(14, Math.floor(Math.min(base, maxW / tot))));
+  qrCv.width = qrCv.height = tot * px; qrCx.fillStyle = '#fff'; qrCx.fillRect(0, 0, qrCv.width, qrCv.height); qrCx.fillStyle = '#000';
+  const bin = atob(st.frames[i]);
+  for (let n = 0; n < m * m; n++) {
+    if ((bin.charCodeAt(n >> 3) >> (7 - (n & 7))) & 1) qrCx.fillRect((quiet + n % m) * px, (quiet + ((n / m) | 0)) * px, px, px);
+  }
+  $('qrPos').textContent = `프레임 ${i + 1} / ${st.n_frames}  (원본 블록 ${st.k}개 + 여분 ${st.n_frames - st.k}개) · 표시 ${tot * px}px (모듈당 ${px}px)` + (px < 3 ? ' ⚠ 모듈이 너무 작아 인식이 어려울 수 있습니다. 표시 크기를 키우거나 QR 크기를 줄이세요.' : '');
+}
+function qrTick() { if (qrStream) { qrIdx = (qrIdx + 1) % qrStream.n_frames; qrDraw(qrIdx); } }
+function qrStart() {
+  clearInterval(qrTimer); if (qrPlaying) qrTimer = setInterval(qrTick, 1000 / +$('qrFps').value);
+  $('qrPlay').textContent = qrPlaying ? '⏸ 정지' : '▶ 재생';
+}
+function qrDownloadLink(f) {      // 지금 QR로 보내는 파일(클립보드면 압축된 clipboard.zip)을 내려받는 링크
+  if (qrDlUrl) URL.revokeObjectURL(qrDlUrl);
+  qrDlUrl = f ? URL.createObjectURL(f) : null;
+  $('qrDl').replaceChildren();
+  if (!f) return;
+  const a = mk('a', { className: 'btn ghost', href: qrDlUrl, download: f.name, textContent: `⬇ ${f.name} 다운로드 (${f.size.toLocaleString()} bytes)` });
+  $('qrDl').append(a, mk('span', { className: 'hint', textContent: '  지금 QR로 보내는 파일 그대로입니다.' }));
+}
+function qrPrepare(f) {      // 파일을 골랐을 때: 재생 중이던 것을 멈추고, 시작 버튼을 누를 때까지 대기
+  clearInterval(qrTimer); qrStream = null; qrPlaying = false;
+  qrCv.hidden = true; $('qrCtl').hidden = true;
+  $('qrGo').disabled = !f;
+  if (f) { qrDownloadLink(f); $('qrInfo').textContent = `${f.name} (${fmtKB(f.size)}) 준비됨 — 설정을 확인한 뒤 「▶ 시작」을 누르세요.`; }
+  else { qrDownloadLink(null); $('qrInfo').textContent = '파일을 선택하세요. 프레임 일부를 놓쳐도 서로 다른 프레임이 (블록 수 + 2~3)개 모이면 복원됩니다.'; }
+}
+async function qrEncode() {
+  const f = qrSource; if (!f) return;
+  $('qrGo').disabled = true;
+  $('qrInfo').textContent = '프레임 생성 중…';
+  try {
+    const q = new URLSearchParams({ version: $('qrVer').value, ecc: $('qrEcc').value, repair: $('qrRepair').value });
+    qrStream = await api('/api/qr/encode?' + q, { method: 'POST', body: f }); qrIdx = 0; qrPlaying = true;
+    const loop = (qrStream.n_frames / +$('qrFps').value).toFixed(1);
+    $('qrInfo').innerHTML = `${f.name} · ${fmtKB(qrStream.size)} → QR ${qrStream.modules}×${qrStream.modules} · 프레임당 ${qrStream.block_size}B · ` +
+      `<b>${qrStream.n_frames}프레임</b> · 한 바퀴 <b>${loop}초</b> (이 시간 동안 끊김 없이 촬영)`;
+    qrCv.hidden = false; $('qrCtl').hidden = false; qrDraw(0); qrStart();
+    qrDownloadLink(f);
+  } catch (e) { $('qrInfo').textContent = '오류: ' + e.message; qrDownloadLink(null); }
+  finally { $('qrGo').disabled = !qrSource; }
+}
+$('qrFile').onchange = () => { qrSource = $('qrFile').files[0] || null; qrPrepare(qrSource); };
+$('qrGo').onclick = qrEncode;
+for (const id of ['qrVer', 'qrEcc', 'qrRepair']) $(id).onchange = () => { if (qrStream) qrEncode(); };   // 이미 시작했다면 새 설정으로 다시 생성
+$('qrFps').onchange = () => { if (qrStream) { qrEncode(); } };
+function qrLayout() {
+  $('qrSend').classList.toggle('qrcenter', $('qrAlign').value === 'center');
+  try { localStorage.setItem('qrView', JSON.stringify({ size: $('qrSize').value, align: $('qrAlign').value })); } catch {}
+  if (qrStream) qrDraw(qrIdx);
+}
+try { const v = JSON.parse(localStorage.getItem('qrView') || 'null'); if (v) { $('qrSize').value = v.size; $('qrAlign').value = v.align; } } catch {}
+$('qrSize').onchange = $('qrAlign').onchange = qrLayout; qrLayout();
+$('qrPlay').onclick = () => { qrPlaying = !qrPlaying; qrStart(); };
+$('qrPrev').onclick = () => { qrPlaying = false; qrStart(); qrIdx = (qrIdx + qrStream.n_frames - 1) % qrStream.n_frames; qrDraw(qrIdx); };
+$('qrNext').onclick = () => { qrPlaying = false; qrStart(); qrTick(); };
+addEventListener('resize', () => { if (qrStream) qrDraw(qrIdx); });
+
+let qrSid = Math.random().toString(36).slice(2) + Date.now().toString(36), qrUrl = null;
+function qrShow(r) {
+  const pct = r.k ? Math.round(r.rank / r.k * 100) : 0;
+  $('qrBar').style.width = pct + '%';
+  let html = '';
+  if (r.done && r.ok) {
+    const bytes = Uint8Array.from(atob(r.data_b64), c => c.charCodeAt(0));
+    if (qrUrl) URL.revokeObjectURL(qrUrl);
+    qrUrl = URL.createObjectURL(new Blob([bytes]));
+    html = `<div class="msg ok">✔ 복원 성공 — ${fmtKB(r.size)} (${r.size} bytes), 전체 CRC32 일치</div>
+            <p><a class="btn" href="${qrUrl}" download="decoded.bin">decoded.bin 다운로드</a> <span class="hint">원래 확장자(.zip 등)로 바꿔 쓰세요.</span></p>`;
+  } else if (r.done) html = '<div class="msg bad">블록은 모였지만 CRC32가 맞지 않습니다. 처음부터 다시 시도하세요.</div>';
+  else if (r.k) html = `<div class="msg warn">${r.rank}/${r.k} 블록 (${pct}%) — 영상을 더 길게 찍거나 다른 영상/사진을 추가하세요. 서로 다른 프레임 ${r.seen}개 수신.</div>`;
+  else html = '<div class="msg warn">QR을 하나도 읽지 못했습니다. 더 밝고 크게, 흔들림 없이 찍어 보세요.</div>';
+  $('qrResult').innerHTML = html;
+}
+$('qrIn').onchange = async () => {
+  const files = [...$('qrIn').files]; if (!files.length) return;
+  try {
+    for (const f of files) {
+      $('qrStatus').textContent = `해독 중… ${f.name} (${(f.size / 1048576).toFixed(1)}MB) — 영상은 시간이 걸립니다`;
+      const q = new URLSearchParams({ session: qrSid, name: f.name, step: $('qrStep').value });
+      const r = await api('/api/qr/decode?' + q, { method: 'POST', body: f });
+      $('qrStatus').textContent = `${f.name}: 새 블록 +${r.gained} · ${r.seconds}초`;
+      qrShow(r); if (r.done && r.ok) break;
+    }
+  } catch (e) { $('qrStatus').textContent = '오류: ' + e.message; }
+  finally { $('qrIn').value = ''; }
+};
+$('qrReset').onclick = async () => {
+  await api('/api/qr/reset?session=' + qrSid, { method: 'POST', body: '' });
+  $('qrBar').style.width = '0'; $('qrResult').innerHTML = ''; $('qrStatus').textContent = '초기화했습니다.';
+};
+</script>
+</body>
+</html>
