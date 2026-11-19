@@ -42,6 +42,16 @@ class ReadPhotoTest(unittest.TestCase):
             self.assertTrue(res.ok, levels)
             self.assertEqual(res.payload, stream[:lay.page_bytes])
 
+    def test_small_cells_clean(self):
+        # 화면 캡처처럼 칸이 3~4px 인 경우 (블러 커널이 짝수가 되면 반 픽셀 밀려 이웃 칸이 섞였다)
+        for cell_px in (3, 4, 5):
+            for levels in (2, 8):
+                lay, stream, cells = page(levels, cols=320, rows=171, size=20000)
+                res = D.read_photo(make_photo(cells, levels, cell_px=cell_px, margin=cell_px * 3, bg=30))
+                self.assertIsNotNone(res, (cell_px, levels))
+                self.assertTrue(res.ok, (cell_px, levels))
+                self.assertEqual(res.payload, stream[:lay.page_bytes])
+
     def test_perspective_color_noise(self):
         lay, stream, cells = page(2)
         img = make_photo(cells, 2, cell_px=8, margin=60, bg=40)

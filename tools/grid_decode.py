@@ -66,8 +66,9 @@ def find_markers(img: np.ndarray):
     corners = []
     for k in order:
         quad = win[k][1]
-        corners.append(quad[int(np.argmax(np.linalg.norm(quad - mid, axis=1)))])      # 격자 바깥쪽 모서리
-    cell_px = float(np.sqrt(np.mean([a for a, _ in win])) / 6)
+        v = quad[int(np.argmax(np.linalg.norm(quad - mid, axis=1)))]                  # 격자 바깥쪽 모서리
+        corners.append(v + (v > mid).astype(np.float32))     # 윤곽은 픽셀 인덱스 좌표: 먼 쪽 모서리는 +1 해야 픽셀 가장자리
+    cell_px = float((np.sqrt(np.mean([a for a, _ in win])) + 1) / 6)     # 윤곽 면적은 한 변이 1px 짧게 잡힌다
     return np.array(corners, np.float32), cell_px
 
 
@@ -81,7 +82,7 @@ def _points(corners, cols, rows, rc):
     src = np.float32([[1, 1], [cols - 1, 1], [cols - 1, rows - 1], [1, rows - 1]])
     M = cv2.getPerspectiveTransform(src, corners.astype(np.float32))
     pts = np.float32(rc[:, ::-1]) + 0.5
-    return cv2.perspectiveTransform(pts.reshape(-1, 1, 2), M).reshape(-1, 2)
+    return cv2.perspectiveTransform(pts.reshape(-1, 1, 2), M).reshape(-1, 2) - 0.5   # 가장자리 좌표 -> 픽셀 인덱스 좌표
 
 
 def _sample(blur, pts):
@@ -137,7 +138,7 @@ def read_photo(img: np.ndarray):
     if m is None:
         return None
     base, cell_px = m
-    k = max(1, int(round(cell_px * 0.6)))
+    k = 2 * int(cell_px * 0.3) + 1          # 칸의 약 60% 폭, 항상 홀수(짝수 커널은 반 픽셀 밀린다)
     blur = cv2.blur(img[:, :, ::-1], (k, k))
     attempts = []
     for rot in range(4):
