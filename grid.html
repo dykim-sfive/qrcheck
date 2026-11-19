@@ -25,6 +25,7 @@
 <div id="bar">
   <input type="file" id="file">
   <label>칸 <select id="cell"><option>2</option><option>3</option><option selected>4</option><option>6</option><option>8</option></select> px</label>
+  <label>여백 <select id="margin"><option>0</option><option>8</option><option>16</option><option selected>24</option><option>32</option><option>48</option></select> px</label>
   <label>색 단계 <select id="levels"><option>2</option><option>4</option><option>8</option></select></label>
   <label>RS <input type="number" id="rs" value="0.2" min="0.02" max="0.78" step="0.05"></label>
   <button id="prev">◀</button><b id="page">-</b><button id="next">▶</button>
@@ -45,7 +46,9 @@ function render() {
   const rsRatio = Math.min(0.78, Math.max(0.02, parseFloat($("rs").value) || 0.2));
   const cellPx = +$("cell").value, levels = +$("levels").value;
   const dpr = window.devicePixelRatio || 1;
-  const cssW = area.clientWidth, cssH = area.clientHeight;
+  const m = +$("margin").value;                       // 화면 모서리가 둥글어 표식이 잘리는 것을 막는 바깥 여백(CSS px)
+  const cssW = area.clientWidth - 2 * m, cssH = area.clientHeight - 2 * m;
+  cv.style.left = cv.style.top = m + "px";
   const res = computeLayout({ cssW, cssH, dpr, cellPx, levels, rsRatio });
   current = res;
   if (!res) {
@@ -96,7 +99,7 @@ $("file").addEventListener("change", async (e) => {
   e.target.blur();
   render();
 });
-for (const id of ["cell", "levels", "rs"]) $(id).addEventListener("change", () => { $(id).blur(); render(); });
+for (const id of ["cell", "margin", "levels", "rs"]) $(id).addEventListener("change", () => { $(id).blur(); render(); });
 $("prev").onclick = () => step(-1);
 $("next").onclick = () => step(+1);
 window.addEventListener("keydown", (e) => {
