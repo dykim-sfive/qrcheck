@@ -169,6 +169,8 @@ class Report:
     per_page: list = field(default_factory=list)
     skipped: int = 0
     crc_mismatch: bool = False        # 모든 구간이 채워졌지만 복원본의 CRC32 가 file_id 와 다름
+    total: int = 0                    # 스트림 전체 바이트 (읽힌 장이 없으면 0)
+    covered: int = 0                  # 지금까지 채워진 바이트
 
 
 def assemble(results) -> Report:
@@ -200,11 +202,44 @@ def assemble(results) -> Report:
         missing.append((i, j))
         i = j
     if missing:
-        return Report(None, None, missing, pages, len(good) - len(mine))
+        return Report(None, None, missing, pages, len(good) - len(mine), total=total, covered=int(have.sum()))
     if G.crc32(bytes(buf)) != fid:        # RS 가 잘못 맞춘 장이나 서로 어긋나는 겹침을 걸러낸다
-        return Report(None, None, [], pages, len(good) - len(mine), crc_mismatch=True)
+        return Report(None, None, [], pages, len(good) - len(mine), crc_mismatch=True, total=total, covered=total)
     name, data = G.parse_stream(bytes(buf))
-    return Report(name, data, [], pages, len(good) - len(mine))
+    return Report(name, data, [], pages, len(good) - len(mine), total=total, covered=total)
+
+
+# ---------- 세션 (웹 페이지/서버용: 사진을 하나씩 더해 가며 진행 상황을 본다) ----------
+class GridSession:
+    def __init__(self):
+        self.results = []
+
+    def add_photo(self, data: bytes, name: str = "") -> dict:
+        """사진 한 장(파일 바이트)을 더한다. 순서는 상관없다. 반환: 이 사진의 결과 요약."""
+        info = dict(name=name, status="unreadable")
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return info
+        res = read_photo(img)
+        if res is None:
+            return dict(info, status="no_grid")
+        self.results.append(res)
+        h = res.header
+        return dict(info, status="ok" if res.ok else "rs_failed", cols=h.cols, rows=h.rows, levels=1 << h.log2l,
+                    offset=h.offset, plen=h.plen, rs_corrected=res.rs_corrected,
+                    cell_error_rate=None if res.cell_error_rate != res.cell_error_rate else res.cell_error_rate)
+
+    def report(self) -> dict:
+        r = assemble(self.results)
+        return dict(done=r.data is not None, name=r.name, total=r.total, covered=r.covered,
+                    missing=[list(m) for m in r.missing_ranges], crc_mismatch=r.crc_mismatch,
+                    pages_ok=sum(1 for p in r.per_page if p["ok"]), skipped=r.skipped,
+                    size=None if r.data is None else len(r.data))
+
+    def result(self):
+        """완료됐으면 (이름, 바이트), 아니면 None."""
+        r = assemble(self.results)
+        return None if r.data is None else (r.name, r.data)
 
 
 # ---------- CLI ----------

@@ -148,5 +148,47 @@ class CliTest(unittest.TestCase):
                 self.assertFalse((Path(tmp) / "evil.bin").exists())
 
 
+def png(img):
+    ok, buf = cv2.imencode(".png", img)
+    assert ok
+    return buf.tobytes()
+
+
+class SessionTest(unittest.TestCase):
+    def photos(self, size=2500):
+        lay = G.make_layout(100, 40, 2)
+        stream = G.build_stream("s.bin", rand_bytes(size))
+        data = G.parse_stream(stream)[1]
+        pages = [png(make_photo(G.render_page(lay, stream, o), 2, bg=30)) for o in range(0, len(stream), lay.page_bytes)]
+        return data, pages
+
+    def test_any_order_and_progress(self):
+        data, pages = self.photos()
+        self.assertEqual(len(pages), 3)
+        ses = D.GridSession()
+        info = ses.add_photo(pages[2], "c.png")
+        self.assertEqual(info["status"], "ok")
+        self.assertEqual((info["cols"], info["rows"], info["levels"]), (100, 40, 2))
+        ses.add_photo(pages[0], "a.png")
+        rep = ses.report()
+        self.assertFalse(rep["done"])
+        self.assertEqual(rep["missing"], [[1020, 2040]])
+        self.assertEqual(rep["total"], len(G.build_stream("s.bin", data)))
+        self.assertGreater(rep["covered"], 0)
+        ses.add_photo(pages[0], "a-again.png")                # 중복은 무해
+        ses.add_photo(pages[1], "b.png")
+        rep = ses.report()
+        self.assertTrue(rep["done"])
+        self.assertEqual(rep["name"], "s.bin")
+        self.assertEqual(ses.result(), ("s.bin", data))
+
+    def test_bad_inputs(self):
+        ses = D.GridSession()
+        self.assertEqual(ses.add_photo(b"not an image", "x")["status"], "unreadable")
+        self.assertEqual(ses.add_photo(png(np.full((300, 400, 3), 255, np.uint8)), "w")["status"], "no_grid")
+        self.assertFalse(ses.report()["done"])
+        self.assertIsNone(ses.result())
+
+
 if __name__ == "__main__":
     unittest.main()
