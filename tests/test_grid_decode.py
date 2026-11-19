@@ -109,6 +109,44 @@ class AssembleTest(unittest.TestCase):
         self.assertIsNone(rep.data)
         self.assertEqual(rep.missing_ranges, [(1020, 1632)])
 
+    def test_wrong_data_is_not_reported_as_success(self):
+        stream = G.build_stream("mix.bin", rand_bytes(3000))
+        res = self.results([(100, 40, 0), (100, 40, 1020), (100, 40, 2040)], stream)
+        res[1].payload = bytes([res[1].payload[0] ^ 1]) + res[1].payload[1:]      # RS 가 잘못 맞춘 장을 흉내
+        rep = D.assemble(res)
+        self.assertIsNone(rep.data)
+        self.assertTrue(rep.crc_mismatch)
+
+
+class CliTest(unittest.TestCase):
+    def photo_for(self, name, tmp):
+        lay = G.make_layout(100, 40, 2)
+        cells = G.render_page(lay, G.build_stream(name, b"hello"), 0)
+        path = Path(tmp) / "p.png"
+        cv2.imwrite(str(path), make_photo(cells, 2, bg=30))
+        return str(path)
+
+    def test_does_not_overwrite_existing_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            out.mkdir()
+            (out / "x.bin").write_bytes(b"precious")
+            self.assertEqual(D.main([self.photo_for("x.bin", tmp), "-o", str(out)]), 1)
+            self.assertEqual((out / "x.bin").read_bytes(), b"precious")
+            self.assertEqual(D.main([self.photo_for("y.bin", tmp), "-o", str(out)]), 0)
+            self.assertEqual((out / "y.bin").read_bytes(), b"hello")
+
+    def test_odd_names_do_not_crash_or_escape(self):
+        import tempfile
+        for name in ("..", ".", "a\x00b", "../../evil.bin"):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "out"
+                self.assertEqual(D.main([self.photo_for(name, tmp), "-o", str(out)]), 0, name)
+                files = [f.name for f in out.iterdir()]
+                self.assertEqual(len(files), 1, name)
+                self.assertFalse((Path(tmp) / "evil.bin").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

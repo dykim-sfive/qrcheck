@@ -168,6 +168,7 @@ class Report:
     missing_ranges: list = field(default_factory=list)
     per_page: list = field(default_factory=list)
     skipped: int = 0
+    crc_mismatch: bool = False        # 모든 구간이 채워졌지만 복원본의 CRC32 가 file_id 와 다름
 
 
 def assemble(results) -> Report:
@@ -200,6 +201,8 @@ def assemble(results) -> Report:
         i = j
     if missing:
         return Report(None, None, missing, pages, len(good) - len(mine))
+    if G.crc32(bytes(buf)) != fid:        # RS 가 잘못 맞춘 장이나 서로 어긋나는 겹침을 걸러낸다
+        return Report(None, None, [], pages, len(good) - len(mine), crc_mismatch=True)
     name, data = G.parse_stream(bytes(buf))
     return Report(name, data, [], pages, len(good) - len(mine))
 
@@ -227,11 +230,19 @@ def main(argv=None) -> int:
     if rep.data is not None:
         out = Path(a.out)
         out.mkdir(parents=True, exist_ok=True)
-        dest = out / (Path(rep.name).name or "restored.bin")        # 경로 성분 제거
+        base = Path(rep.name).name                                   # 경로 성분 제거
+        if base in ("", ".", "..") or any(ord(ch) < 32 for ch in base):
+            base = "restored.bin"
+        dest = out / base
+        if dest.exists():
+            print(f"복원은 성공했지만 {dest} 가 이미 있어 덮어쓰지 않습니다. 다른 폴더(-o)를 지정하세요.")
+            return 1
         dest.write_bytes(rep.data)
         print(f"복원 성공: {dest} ({len(rep.data):,} B)")
         return 0
-    if rep.missing_ranges:
+    if rep.crc_mismatch:
+        print("복원 실패 — 모든 구간이 채워졌지만 CRC 가 맞지 않습니다 (오류가 많은 장이 잘못 복구됐거나 서로 다른 장이 겹침). 해당 장을 다시 찍으세요.")
+    elif rep.missing_ranges:
         print("복원 실패 — 아직 없는 바이트 구간(스트림 기준):", ", ".join(f"{s}-{e}" for s, e in rep.missing_ranges))
     else:
         print("복원 실패 — 읽힌 장이 없습니다.")
