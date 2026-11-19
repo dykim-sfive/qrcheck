@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>화면 격자 전송</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; flex-direction: column; font: 12px/1 system-ui, sans-serif; color: #eee; }
+  #bar { flex: none; height: 28px; box-sizing: border-box; background: #161616; display: flex; align-items: center;
+         gap: 10px; padding: 0 8px; white-space: nowrap; overflow: hidden; }
+  #bar.hidden > * { visibility: hidden; }
+  #bar select, #bar input[type=number] { background: #2a2a2a; color: #eee; border: 0; border-radius: 3px; font-size: 12px; padding: 2px 4px; }
+  #bar input[type=number] { width: 48px; }
+  #bar button { background: #2a2a2a; color: #eee; border: 0; border-radius: 3px; padding: 2px 8px; cursor: pointer; }
+  #bar b { color: #8cf; font-weight: 600; }
+  #info { color: #aaa; }
+  #area { flex: 1; position: relative; min-height: 0; }
+  canvas { position: absolute; left: 0; top: 0; }
+  #msg { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center;
+         color: #fc6; font-size: 16px; padding: 20px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <input type="file" id="file">
+  <label>칸 <select id="cell"><option>2</option><option>3</option><option selected>4</option><option>6</option><option>8</option></select> px</label>
+  <label>색 단계 <select id="levels"><option>2</option><option>4</option><option>8</option></select></label>
+  <label>RS <input type="number" id="rs" value="0.2" min="0.02" max="0.78" step="0.05"></label>
+  <button id="prev">◀</button><b id="page">-</b><button id="next">▶</button>
+  <span id="info"></span>
+  <span style="margin-left:auto;color:#777">←/→ 장 넘김 · S 설정 줄 숨김</span>
+</div>
+<div id="area"><canvas id="cv"></canvas><div id="msg"></div></div>
+<script type="module">
+import { buildStream, renderPage } from "./grid/format.js";
+import { computeLayout, stepOffset, pageNumber, pageCount } from "./grid/paging.js";
+import { drawPage } from "./grid/draw.js";
+
+const $ = (id) => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d"), area = $("area"), msg = $("msg");
+let stream = null, offset = 0, current = null;
+
+function render() {
+  const rsRatio = Math.min(0.78, Math.max(0.02, parseFloat($("rs").value) || 0.2));
+  const cellPx = +$("cell").value, levels = +$("levels").value;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = area.clientWidth, cssH = area.clientHeight;
+  const res = computeLayout({ cssW, cssH, dpr, cellPx, levels, rsRatio });
+  current = res;
+  if (!res) {
+    cv.style.display = "none";
+    msg.style.display = "flex";
+    msg.textContent = "창이 너무 작습니다 (최소 90×20칸). 창을 키우거나 칸 크기를 줄이세요.";
+    $("info").textContent = ""; $("page").textContent = "-";
+    return;
+  }
+  const { layout, pxW, pxH } = res;
+  cv.style.display = "block";
+  cv.width = pxW; cv.height = pxH;
+  cv.style.width = pxW / dpr + "px"; cv.style.height = pxH / dpr + "px";
+  ctx.imageSmoothingEnabled = false;
+  if (!stream) {
+    msg.style.display = "flex";
+    msg.textContent = "파일을 선택하세요.";
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, pxW, pxH);
+    $("info").textContent = `${layout.cols}×${layout.rows}칸 · 장당 ${layout.pageBytes.toLocaleString()} B`;
+    $("page").textContent = "-";
+    return;
+  }
+  msg.style.display = "none";
+  offset = Math.min(offset, Math.max(0, stream.length - 1));
+  const { cells } = renderPage(layout, stream, offset);
+  drawPage(ctx, layout, cells, cellPx, pxW, pxH);
+  $("page").textContent = `${pageNumber(offset, layout.pageBytes)} / ${pageCount(stream.length, layout.pageBytes)}`;
+  $("info").textContent = `${layout.cols}×${layout.rows}칸 · 장당 ${layout.pageBytes.toLocaleString()} B · 전체 ${stream.length.toLocaleString()} B · offset ${offset}`;
+}
+
+function step(dir) {
+  if (!stream || !current) return;
+  offset = stepOffset(offset, current.layout.pageBytes, dir, stream.length);
+  render();
+}
+
+$("file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    stream = buildStream(f.name, new Uint8Array(await f.arrayBuffer()));
+  } catch (err) {
+    alert(err.message);
+    e.target.value = "";
+    return;
+  }
+  offset = 0;
+  e.target.blur();
+  render();
+});
+for (const id of ["cell", "levels", "rs"]) $(id).addEventListener("change", () => { $(id).blur(); render(); });
+$("prev").onclick = () => step(-1);
+$("next").onclick = () => step(+1);
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" && e.target.type === "number") return;
+  if (e.key === "ArrowRight") { step(+1); e.preventDefault(); }
+  else if (e.key === "ArrowLeft") { step(-1); e.preventDefault(); }
+  else if (e.key === "s" || e.key === "S") $("bar").classList.toggle("hidden"); // 줄 자리는 그대로 둬서 격자가 변하지 않는다
+});
+let timer = 0;
+window.addEventListener("resize", () => { clearTimeout(timer); timer = setTimeout(render, 100); });
+render();
+</script>
+</body>
+</html>
