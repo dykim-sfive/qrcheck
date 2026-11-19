@@ -4,3 +4,4 @@ segno                      # QR 생성 (순수 Python)
 zxing-cpp                  # QR 해독 (촬영 영상에서 OpenCV 해독기보다 훨씬 잘 읽음)
 opencv-python-headless     # 영상/사진 읽기, 확대
 numpy                      # 렌더링/OpenCV 의존
+reedsolo

@@ -6,3 +6,4 @@ dist/
 *.mp4
 *.mov
 .superpowers/
+node_modules/
