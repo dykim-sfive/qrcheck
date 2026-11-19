@@ -183,6 +183,12 @@ def _base_cells(layout: Layout) -> np.ndarray:
     return cells
 
 
+def reference_row(cols: int, levels: int) -> np.ndarray:
+    """기준 행(r=0, c=8..cols-9)의 단계 인덱스 (cols-16, 3). 수신 쪽 색 보정이 쓴다."""
+    lay = Layout(cols, MIN_ROWS, levels, 51)
+    return _base_cells(lay)[0, CORNER:cols - CORNER].copy()
+
+
 def _compose(layout: Layout, hdr: Header, padded: bytes) -> np.ndarray:
     """padded = 장당 page_bytes 바이트(0 패딩 포함). 격자 전체를 만든다."""
     k = BLOCK - layout.nsym
