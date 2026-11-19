@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>화면 격자 해독</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1b1b; --muted:#6b6b6b; --line:#ddd; --acc:#1a6fe0; --ok:#1b8a3a; --bad:#c62828; --card:#f6f6f6; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141414; --fg:#eee; --muted:#999; --line:#333; --acc:#6aa8ff; --ok:#5fd07f; --bad:#ff7b7b; --card:#1e1e1e; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,sans-serif; }
+  main { max-width:860px; margin:0 auto; padding:24px 16px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; } p.sub { color:var(--muted); margin:0 0 18px; }
+  #drop { border:2px dashed var(--line); border-radius:10px; padding:28px; text-align:center; background:var(--card); cursor:pointer; }
+  #drop.over { border-color:var(--acc); }
+  .bar { height:14px; background:var(--card); border:1px solid var(--line); border-radius:7px; overflow:hidden; margin:18px 0 6px; }
+  .bar i { display:block; height:100%; width:0; background:var(--acc); transition:width .2s; }
+  .bar.done i { background:var(--ok); }
+  #summary { color:var(--muted); font-size:14px; }
+  #dl { display:none; margin:14px 0; padding:10px 16px; border-radius:8px; background:var(--ok); color:#fff; text-decoration:none; font-weight:600; }
+  table { width:100%; border-collapse:collapse; margin-top:16px; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  button { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; }
+  #warn { color:var(--bad); font-size:14px; margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>화면 격자 해독</h1>
+  <p class="sub">격자 화면을 찍은 사진을 <b>순서 상관없이</b> 여러 장 선택하세요. 각 장에 파일 위치가 들어 있어서 알아서 맞춥니다. 사진은 이 컴퓨터의 서버로만 전송됩니다.</p>
+  <div id="drop">사진을 여기로 끌어 놓거나 클릭해서 선택 (여러 장 가능)<input id="file" type="file" accept="image/*" multiple hidden></div>
+  <div class="bar" id="bar"><i></i></div>
+  <div id="summary">아직 읽은 사진이 없습니다.</div>
+  <div id="warn"></div>
+  <a id="dl" href="#">⬇ 복원한 파일 내려받기</a>
+  <div><button id="reset">처음부터 다시</button></div>
+  <table>
+    <thead><tr><th>사진</th><th>결과</th><th>격자</th><th>단계</th><th>바이트 구간</th><th>RS 정정</th><th>칸 오류율</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let sid = crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2);
+let queue = Promise.resolve();
+const LABEL = { ok: "OK", rs_failed: "오류 정정 실패", no_grid: "격자를 찾지 못함", unreadable: "이미지를 읽을 수 없음" };
+
+function addFiles(files) {
+  for (const f of files) queue = queue.then(() => send(f));
+}
+async function send(f) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td></td><td>처리 중…</td><td></td><td></td><td></td><td></td><td></td>`;
+  tr.children[0].textContent = f.name;
+  $("rows").appendChild(tr);
+  try {
+    const r = await fetch(`/api/grid/photo?session=${sid}&name=${encodeURIComponent(f.name)}`, { method: "POST", body: f });
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    const p = j.photo, c = tr.children;
+    c[1].textContent = LABEL[p.status] || p.status;
+    c[1].className = p.status === "ok" ? "ok" : "bad";
+    if (p.cols) {
+      c[2].textContent = `${p.cols}×${p.rows}`; c[3].textContent = p.levels;
+      c[4].textContent = `${p.offset.toLocaleString()} – ${(p.offset + p.plen).toLocaleString()}`;
+      c[5].textContent = p.rs_corrected;
+      c[6].textContent = p.cell_error_rate == null ? "-" : (p.cell_error_rate * 100).toFixed(2) + "%";
+    }
+    show(j.report);
+  } catch (e) {
+    tr.children[1].textContent = "오류: " + e.message;
+    tr.children[1].className = "bad";
+  }
+}
+function show(rep) {
+  const pct = rep.total ? Math.round((100 * rep.covered) / rep.total) : 0;
+  $("bar").classList.toggle("done", rep.done);
+  $("bar").firstElementChild.style.width = pct + "%";
+  let t = rep.total ? `${rep.covered.toLocaleString()} / ${rep.total.toLocaleString()} B (${pct}%) · 읽힌 장 ${rep.pages_ok}` : "아직 읽은 사진이 없습니다.";
+  if (rep.done) t += ` · 완료: ${rep.name} (${rep.size.toLocaleString()} B)`;
+  $("summary").textContent = t;
+  $("warn").textContent = rep.crc_mismatch ? "모든 구간이 채워졌지만 CRC 가 맞지 않습니다. 오류가 많은 장이 잘못 복구됐을 수 있으니 해당 장을 다시 찍어 추가하세요." :
+    rep.missing.length ? "아직 없는 바이트 구간: " + rep.missing.map(([s, e]) => `${s.toLocaleString()}–${e.toLocaleString()}`).join(", ") + " (이 구간이 들어 있는 장을 추가하세요)" : "";
+  const dl = $("dl");
+  dl.style.display = rep.done ? "inline-block" : "none";
+  dl.href = `/api/grid/file?session=${sid}`;
+}
+const drop = $("drop");
+drop.onclick = () => $("file").click();
+$("file").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); };
+$("reset").onclick = async () => {
+  await queue;
+  const j = await (await fetch(`/api/grid/reset?session=${sid}`, { method: "POST" })).json();
+  $("rows").innerHTML = ""; show(j.report);
+};
+</script>
+</body>
+</html>

@@ -14,7 +14,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import pack
 
@@ -28,11 +28,19 @@ except ImportError:
     QR_OK = False
 
 ROOT = Path(__file__).resolve().parent
+try:
+    sys.path.insert(0, str(ROOT / "tools"))
+    import grid_decode
+    GRID_OK = True
+except ImportError:
+    grid_decode = None
+    GRID_OK = False
 MAX_BODY = 30 * 1024 * 1024               # 일반 요청(JSON, 인코딩할 파일)
 QR_MAX_UPLOAD = 1024 * 1024 * 1024        # 촬영한 영상 업로드
 QR_NEED = "QR 기능에는 `pip install -r requirements.txt` (segno, zxing-cpp, opencv-python-headless, numpy) 가 필요합니다."
 
 _qr_sessions: dict = {}
+_grid_sessions: dict = {}
 _qr_lock = threading.Lock()
 
 
@@ -49,6 +57,21 @@ def qr_session(sid: str, reset: bool = False):
         dec = _qr_sessions[sid][1]
         _qr_sessions[sid] = (now, dec)
         return dec
+
+
+def grid_session(sid: str, reset: bool = False):
+    """격자 사진 해독 세션 (사진을 하나씩 더해 가며 조립). 1시간 미사용 시 폐기."""
+    with _qr_lock:
+        now = time.time()
+        for k in [k for k, (t, _) in _grid_sessions.items() if now - t > 3600]:
+            del _grid_sessions[k]
+        if reset or sid not in _grid_sessions:
+            if len(_grid_sessions) >= 20:
+                raise ValueError("세션이 너무 많습니다")
+            _grid_sessions[sid] = (now, grid_decode.GridSession())
+        ses = _grid_sessions[sid][1]
+        _grid_sessions[sid] = (now, ses)
+        return ses
 
 
 def qr_progress(dec, extra=None) -> dict:
@@ -85,7 +108,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif path == "/grid.html" or (path.startswith("/grid/") and path.endswith(".js")):
+        elif path == "/api/grid/file":
+            q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+            done = grid_session(q.get("session", "")).result() if GRID_OK else None
+            if done is None:
+                self._json(dict(error="not ready"), 404)
+                return
+            name, data = done
+            base = Path(name).name
+            if base in ("", ".", "..") or any(ord(ch) < 32 for ch in base):
+                base = "restored.bin"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(base))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        elif path in ("/grid.html", "/grid_decode.html") or (path.startswith("/grid/") and path.endswith(".js")):
             f = (ROOT / path.lstrip("/")).resolve()
             if f.parent not in (ROOT, ROOT / "grid") or not f.is_file():
                 self._json(dict(error="not found"), 404)
@@ -123,6 +162,12 @@ class Handler(BaseHTTPRequestHandler):
                 st = qr_codec.make_stream(data, ver, ecc, rep)
                 self._json(dict(frames=st.frames, modules=st.modules, k=st.k, n_frames=st.n_frames,
                                 block_size=st.block_size, size=len(data), version=ver, ecc=ecc))
+            elif u.path in ("/api/grid/photo", "/api/grid/reset"):
+                if not GRID_OK:
+                    raise RuntimeError("격자 해독에는 `pip install -r requirements.txt` (opencv, numpy, reedsolo) 가 필요합니다.")
+                ses = grid_session(q.get("session", ""), reset=u.path.endswith("reset"))
+                info = ses.add_photo(self._body(), q.get("name", "")) if u.path.endswith("photo") else None
+                self._json(dict(photo=info, report=ses.report()))
             elif u.path == "/api/qr/reset":
                 if not QR_OK:
                     raise RuntimeError(QR_NEED)
